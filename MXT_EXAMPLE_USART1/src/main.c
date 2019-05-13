@@ -88,12 +88,20 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+
+#include "font_24.h"
 #include "conf_board.h"
 #include "conf_example.h"
 #include "conf_uart_serial.h"
 
 #define MAX_ENTRIES        3
 #define STRING_LENGTH     70
+
+#define TASK_MONITOR_STACK_SIZE            (2048/sizeof(portSTACK_TYPE))
+#define TASK_MONITOR_STACK_PRIORITY        (tskIDLE_PRIORITY)
+#define TASK_LED_STACK_SIZE                (1024/sizeof(portSTACK_TYPE))
+#define TASK_LED_STACK_PRIORITY            (tskIDLE_PRIORITY)
+
 
 #define USART_TX_MAX_LENGTH     0xff
 
@@ -107,6 +115,9 @@ const uint32_t BUTTON_Y = ILI9488_LCD_HEIGHT/2;
 /** RTOS  */
 #define TASK_MXT_STACK_SIZE            (2*1024/sizeof(portSTACK_TYPE))
 #define TASK_MXT_STACK_PRIORITY        (tskIDLE_PRIORITY)  
+
+volatile char texto[32];
+
 
 /************************************************************************/
 /* RTOS application funcs                                               */
@@ -347,6 +358,35 @@ void mxt_handler(struct mxt_device *device)
 		usart_serial_write_packet(USART_SERIAL_EXAMPLE, (uint8_t *)tx_buf, strlen(tx_buf));
 	}
 }
+void font_draw_text(tFont *font, const char *text, int x, int y, int spacing) {
+	char *p = text;
+	
+	while(*p != NULL) {
+		char letter = *p;
+		int letter_offset = letter - font->start_char;
+		
+		if(letter <= font->end_char) {
+			tChar *current_char = font->chars + letter_offset;
+			ili9488_draw_pixmap(x, y, current_char->image->width, current_char->image->height, current_char->image->data);
+			x += current_char->image->width + spacing;
+		}
+		p++;
+	}
+}
+
+static void task_led(void *pvParameters)
+{
+	/* Block for 500ms. */
+	const TickType_t xDelay = 500 / portTICK_PERIOD_MS;
+	int a = 0;
+	for (;;) {
+		sprintf(texto, "%d", a);
+		font_draw_text(&font_24, texto, 10, 10, 1);
+		//LED_Toggle(LED0);
+		vTaskDelay(xDelay);
+		a++;
+	}
+}
 
 void task_mxt(void){
   
@@ -382,6 +422,7 @@ int main(void)
 	configure_lcd();
 	draw_screen();
 	draw_button(0);
+	LED_Toggle(LED0);
 
 	/* Initialize stdio on USART */
 	stdio_serial_init(USART_SERIAL_EXAMPLE, &usart_serial_options);
@@ -392,6 +433,9 @@ int main(void)
   if (xTaskCreate(task_mxt, "mxt", TASK_MXT_STACK_SIZE, NULL, TASK_MXT_STACK_PRIORITY, NULL) != pdPASS) {
     printf("Failed to create test led task\r\n");
   }
+  xTaskCreate(task_led, "Led", TASK_LED_STACK_SIZE, NULL,
+  TASK_LED_STACK_PRIORITY, NULL);
+  
 
   /* Start the scheduler. */
   vTaskStartScheduler();
